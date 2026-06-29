@@ -1,0 +1,27 @@
+# Backup automatici dell'app
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Ambienti virtuali
+venv/
+.venv/
+env/
+
+# File di sistema
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# File sensibili
+.env
+secrets.toml
