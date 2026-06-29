@@ -514,9 +514,7 @@ def scansione_radar(
 
     regimi = {}
     if usa_regime:
-        regimi = eng.carica_regimi(
-            tickers, "2y", tieni_oggi=tieni_oggi, ora_it=ora_it
-        )
+        regimi = eng.carica_regimi(tickers, "2y")
 
     righe = []
     for t_info in titoli:
@@ -526,7 +524,7 @@ def scansione_radar(
             continue
         try:
             comp = _solo_complete(
-                df, ticker=t, tieni_oggi=tieni_oggi, ora_it=ora_it
+                df
             )
             if len(comp) < MIN_CANDELE:
                 falliti.append(f"{t} (storico corto: {len(comp)} candele)")
@@ -668,9 +666,7 @@ def semaforo_radar(
 
     regimi = {}
     if usa_regime:
-        regimi = eng.carica_regimi(
-            tickers, "2y", tieni_oggi=tieni_oggi, ora_it=ora_it
-        )
+        regimi = eng.carica_regimi(tickers, "2y")
 
     righe = []
     for t_info in titoli:
@@ -680,7 +676,7 @@ def semaforo_radar(
             continue
         try:
             comp = _solo_complete(
-                df, ticker=t, tieni_oggi=tieni_oggi, ora_it=ora_it
+                df
             )
             if len(comp) < MIN_CANDELE:
                 falliti.append(f"{t} (storico corto)")
@@ -879,8 +875,55 @@ if cc[1].button("Aggiungi e classifica", use_container_width=True, key="rdr_add"
         if errori: st.error("Non aggiunti: " + " · ".join(errori))
         if aggiunti: st.rerun()
 
+# ── Import / Export sempre visibili (anche watchlist vuota) ──
+with st.expander("📂 Importa / Esporta watchlist", expanded=not titoli):
+    st.caption(
+        "Carica il file titoli_radar.json dalla tua macchina locale per ripristinare "
+        "la watchlist. Su Streamlit Cloud i dati non persistono al riavvio: "
+        "esporta e ricarica quando necessario."
+    )
+    ie_col1, ie_col2 = st.columns(2)
+
+    # ── IMPORTA ──────────────────────────────────────────────
+    uploaded = ie_col1.file_uploader(
+        "📥 Importa titoli_radar.json",
+        type=["json"],
+        key="rdr_upload",
+        help="Carica il file JSON esportato dal PC locale",
+    )
+    if uploaded is not None:
+        try:
+            src = json.load(uploaded)
+            if not isinstance(src, list):
+                st.error("File non valido: deve essere una lista JSON.")
+            else:
+                esistenti = {t["ticker"] for t in titoli}
+                nuovi = [x for x in src if x.get("ticker") not in esistenti]
+                titoli.extend(nuovi)
+                for t in titoli:
+                    t.setdefault("algoritmo",  "momentum")
+                    t.setdefault("volatilita", 0.0)
+                    t.setdefault("carattere",  "calmo")
+                jsave(TIT_FILE, titoli)
+                invalida()
+                ie_col1.success(f"✅ Importati {len(nuovi)} titoli ({len(titoli)} totali).")
+                st.rerun()
+        except Exception as ex:
+            st.error(f"Errore importazione: {ex}")
+
+    # ── ESPORTA ──────────────────────────────────────────────
+    ie_col2.download_button(
+        "📤 Esporta watchlist (JSON)",
+        data=json.dumps(titoli, ensure_ascii=False, indent=2),
+        file_name="titoli_radar.json",
+        mime="application/json",
+        use_container_width=True,
+        key="rdr_exp",
+        help="Salva la watchlist sul PC per ricaricarla in seguito",
+    )
+
 if not titoli:
-    st.info("Watchlist vuota. Aggiungi i titoli qui sopra.")
+    st.info("Watchlist vuota — aggiungi titoli qui sopra oppure importa il file JSON.")
     st.stop()
 
 calmi   = [t for t in titoli if t.get("algoritmo") == "momentum"]
@@ -909,30 +952,6 @@ with st.expander("Vedi / gestisci watchlist"):
         jsave(TIT_FILE, titoli)
         invalida()
         st.rerun()
-
-    if os.path.exists("titoli_segnali.json"):
-        if st.button("Importa da titoli_segnali.json", key="rdr_import"):
-            try:
-                esistenti = {t["ticker"] for t in titoli}
-                with open("titoli_segnali.json", encoding="utf-8") as f:
-                    src = json.load(f)
-                nuovi = [x for x in src if x.get("ticker") not in esistenti]
-                titoli.extend(nuovi)
-                jsave(TIT_FILE, titoli)
-                invalida()
-                st.success(f"Importati {len(nuovi)} titoli.")
-                st.rerun()
-            except Exception as ex:
-                st.error(f"Errore import: {ex}")
-
-    st.download_button(
-        "Esporta watchlist (JSON)",
-        data=json.dumps(titoli, ensure_ascii=False, indent=2),
-        file_name="titoli_radar.json",
-        mime="application/json",
-        use_container_width=True,
-        key="rdr_exp",
-    )
 
 st.divider()
 
@@ -988,6 +1007,35 @@ st.caption(
     "6 componenti: c>EMA20 · c>EMA50 · c>EMA200 · EMA20>50 · RSI>50 · HH-HL. "
     "Score 5–6 = BULLISH 🟢 · 3–4 = NEUTRAL ⚪ · 0–2 = BEARISH 🔴"
 )
+
+with st.expander("📖 Come funziona e come usarla"):
+    st.markdown("""
+**Cos'è**
+Il bias POLARIS valuta ogni titolo su 6 componenti daily indipendenti.
+Filtra l'universo *prima* di cercare segnali: non ha senso entrare long
+su un titolo con struttura debole, anche se l'algoritmo dà un segnale.
+
+**I 6 componenti**
+| Componente | Significato |
+|---|---|
+| c > EMA 20 | Prezzo sopra la media veloce |
+| c > EMA 50 | Prezzo sopra la media intermedia |
+| c > EMA 200 | Trend di lungo periodo positivo |
+| EMA 20 > EMA 50 | Allineamento delle medie (momentum) |
+| RSI > 50 | Momentum positivo |
+| HH-HL | Struttura di massimi e minimi crescenti |
+
+**Come leggere i risultati**
+- 🟢 **BULLISH 5–6/6** → bias forte, sono i candidati ideali per il trade
+- ⚪ **NEUTRAL 3–4/6** → struttura incerta, evita o aspetta conferma
+- 🔴 **BEARISH 0–2/6** → evita le posizioni long, il mercato non è dalla tua parte
+
+**Workflow mattutino consigliato**
+1. Premi **Aggiorna POLARIS** (primo click del giorno)
+2. Filtra la vista su **solo BULLISH**
+3. Annota i titoli con score 5–6/6 → questi sono i candidati per la scansione
+4. Vai alla sezione **Segnali** e cerca conferma algoritmica
+""")
 
 pol_c1, pol_c2 = st.columns([1, 3])
 btn_polaris   = pol_c1.button("🌟  Aggiorna POLARIS", type="primary", use_container_width=True, key="rdr_pol")
@@ -1066,6 +1114,46 @@ st.caption(
     "M = Momentum · P = Pullback · C = Compressione · "
     "Pb. = volume pullback in calo · R:R 🟢≥2 · 🟡1.5–2 · 🔴<1.5 · 🔗 = confluenza 2+."
 )
+
+with st.expander("📖 Come funziona e come usarla"):
+    st.markdown("""
+**Cos'è**
+Scansiona tutta la watchlist cercando segnali dai tre algoritmi su titoli
+già filtrati da POLARIS (e dal regime indice se attivo).
+Lo **Score 0–10** misura la qualità del contesto al momento del segnale.
+
+**I tre algoritmi**
+| Algoritmo | Quando scatta | Titoli tipici |
+|---|---|---|
+| **M** Momentum | Breakout su forza, volume in aumento | Titoli calmi, trend netti |
+| **P** Pullback | Ritracciamento su supporto con volume in calo | Titoli nervosi, veloci |
+| **C** Compressione | Consolidamento prima di una mossa | Tutti i profili |
+
+**Come leggere lo Score**
+- **8–10** → setup eccellente, ADX forte + volume + candela + confluenza
+- **6–7** → setup buono, entra con attenzione al trigger
+- **4–5** → setup mediocre, aspetta conferma o salta
+- **< 4** → segnale debole, sconsigliato
+
+**Come leggere il R:R**
+- 🟢 **≥ 2.0** → rischio/rendimento accettabile per il tuo sistema (stop 1.5% / target 5–6%)
+- 🟡 **1.5–2.0** → borderline, valuta solo con score alto
+- 🔴 **< 1.5** → R:R sfavorevole, salta il trade
+
+**🔗 Confluenza**
+Due o più algoritmi attivi sullo stesso titolo: è il segnale più robusto.
+Prioritizza sempre le confluenze rispetto ai segnali singoli.
+
+**Pb. (Pullback sano)**
+🟢 = volume in calo durante il ritracciamento (distribuzione assente)
+🔴 = volume alto sul pullback (possibile distribuzione, cautela)
+
+**Comportamento corretto**
+1. Ordina per **Score** (già fatto automaticamente)
+2. Filtra mentalmente: Score ≥ 6 + R:R ≥ 2 + POLARIS 🟢
+3. Controlla la **data** del segnale — se ha più di 2 giorni, aspetta conferma
+4. Usa il **Semaforo** per decidere il momento esatto di entrata
+""")
 
 btn_scan = st.button(
     "🔍  Cerca segnali", type="primary", use_container_width=False, key="rdr_scan"
@@ -1202,6 +1290,38 @@ st.caption(
     "Stato: VIA LIBERA → STALLO (3–5 gg) → SCADUTO (6+ gg) → … "
     "Prezzi intraday Yahoo (~15 min di ritardo)."
 )
+
+with st.expander("📖 Come funziona e come comportarsi"):
+    st.markdown("""
+**Cos'è**
+Monitora in tempo reale i titoli con segnale attivo e mostra lo stato
+di ogni potenziale ingresso rispetto al **trigger** (massimo dell'ultima candela completa).
+Aggiorna a mercato aperto — prezzi Yahoo con ~15 min di ritardo.
+
+**Gli stati e come comportarsi**
+
+| Stato | Significato | Cosa fare |
+|---|---|---|
+| 🟩 **VIA LIBERA** | Prezzo sopra il trigger, in zona di entrata | Valuta l'ingresso ora. Controlla che il prezzo non sia già troppo esteso (colonna Δ ATR) |
+| 🟦 **ATTESA TRIGGER** | Il massimo di ieri non è ancora stato rotto | Imposta un ordine stop buy sopra il trigger. Aspetta la rottura con volume |
+| 🟧 **STALLO** | 3–5 sessioni senza trigger | Il momentum si sta raffreddando. Mantieni l'ordine ma abbassa la priorità |
+| ⬜ **SCADUTO** | 6+ sessioni senza trigger | Il setup è compromesso. Rimuovi l'ordine, il momentum è perso |
+| 🟨 **NON INSEGUIRE** | Prezzo troppo lontano dal trigger (> 1×ATR) | Non entrare — il rischio si è spostato. Aspetta un nuovo setup |
+| 🟥 **ANNULLATO** | Prezzo sceso troppo dalla chiusura (< 0.5×ATR) | Il segnale è invalidato. Non fare nulla |
+| **DATI N/D** | Nessun dato intraday disponibile | Borsa chiusa o ticker non supportato in intraday da Yahoo |
+
+**Colonna Δ (ATR)**
+Distanza del prezzo corrente dal trigger, espressa in multipli di ATR.
+- Negativo = prezzo sotto il trigger (ancora in attesa)
+- Positivo < 1 = zona accettabile per l'ingresso
+- Positivo > 1 = troppo esteso, rischio aumentato
+
+**Workflow operativo**
+1. Aggiorna dopo le **9:05** per .MI (mercato aperto)
+2. Priorità: **VIA LIBERA** → **ATTESA TRIGGER** (con ordine impostato)
+3. Archivia mentalmente gli **SCADUTI** e **ANNULLATI**
+4. Usa «Solo confluenze (2+)» per filtrare solo i setup più forti
+""")
 
 sf_col1, sf_col2, sf_col3 = st.columns([1, 1, 2])
 btn_sf       = sf_col1.button(
