@@ -60,9 +60,11 @@ _seg_v3        = getattr(eng, "_seg_v3", None)
 MIN_CANDELE    = getattr(eng, "MIN_CANDELE", 250)
 
 # ── configurazione pagina ───────────────────────────────────
+from PIL import Image as _PILImage
+_icon = _PILImage.open("icon.png")
 st.set_page_config(
-    page_title="POLARIS Radar — Scanner Unificato",
-    page_icon="🌟",
+    page_title="POLARIS Radar",
+    page_icon=_icon,
     layout="wide",
 )
 
